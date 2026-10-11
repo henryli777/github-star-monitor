@@ -1,0 +1,12 @@
+{
+  "name": "starscope",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Star 排行、项目监控与收入披露看板",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}
