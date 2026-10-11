@@ -7,7 +7,8 @@
 需要 Node.js 22 或更新版本；无需安装第三方依赖。
 
 ```sh
-cd /Users/henry/enlink/liebesu_code/website/x_github/starscope
+git clone https://github.com/henryli777/github-star-monitor.git
+cd github-star-monitor
 npm start
 ```
 
