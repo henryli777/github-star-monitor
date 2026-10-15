@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRefreshController } from '../public/refresh-controller.mjs';
+import { readFile } from 'node:fs/promises';
 
 function setup({ visible = true, read = async () => ({ stars: 20, fetchedAt: 'new' }) } = {}) {
   let nextTimer = 0;
@@ -54,6 +55,20 @@ test('pages initially hidden start without a timer and online refreshes only whe
   app.setVisible(true);
   await app.controller.online();
   assert.equal(app.applied.length, 1);
+});
+
+test('returning window focus immediately reads the shared snapshot', async () => {
+  const source = await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8');
+  const listeners = new Map();
+  const app = setup();
+  const browser = { addEventListener(name, callback) { listeners.set(name, callback); } };
+  const events = source.slice(source.indexOf("document.addEventListener('visibilitychange'"), source.indexOf('\npopulateScenarioForm();'));
+  new Function('document', 'window', 'sharedRefresh', events)(browser, browser, app.controller);
+  app.controller.start();
+  await listeners.get('focus')?.();
+  await new Promise(setImmediate);
+  assert.equal(app.applied.length, 1, 'focus must read the current shared snapshot');
+  app.controller.stop();
 });
 
 test('timer visibility and online events share a single in-flight read', async () => {

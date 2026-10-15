@@ -186,8 +186,9 @@ export async function createApplication({ dataDir = join(ROOT, 'data'), publicDi
         monitorCount: store.monitors().length, lastRefreshAt: store.lastRefreshAt(), now: new Date(now()).toISOString() });
     }
     if (url.pathname === '/api/rankings') {
-      const params = queryValues(url, ['language', 'topic', 'q', 'new', 'fresh']);
-      return sendJson(response, 200, await github.rankings(params, { allowFresh: !publicMode }));
+      const { cached, ...params } = queryValues(url, ['language', 'topic', 'q', 'new', 'fresh', 'cached']);
+      if (cached !== undefined && cached !== '1') throw new AppError('INVALID_SEARCH', '搜索条件无效。');
+      return sendJson(response, 200, await github.rankings(params, { allowFresh: !publicMode, cacheOnly: cached === '1' }));
     }
     if (url.pathname === '/api/repo') {
       const { name } = queryValues(url, ['name']);

@@ -183,6 +183,34 @@ test('public refresh reads the shared cache instead of bypassing it', async (t) 
   assert.equal((await json(origin, '/api/rankings?fresh=%091')).status, 400);
 });
 
+test('automatic ranking reads never acquire upstream after cache expiry or on an uncached search', async (t) => {
+  let calls = 0;
+  let clock = Date.parse('2026-10-15T00:00:00Z');
+  const { origin } = await setup(t, { publicMode: true, now: () => clock, fetchImpl: async () => {
+    calls++;
+    return Response.json({ items: [sample], total_count: 1, incomplete_results: false });
+  } });
+  const initial = await json(origin, '/api/rankings');
+  clock += 30 * 60000;
+  const cached = await json(origin, '/api/rankings?cached=1');
+  assert.equal(cached.status, 200);
+  assert.equal(cached.body.meta.fetchedAt, initial.body.meta.fetchedAt);
+  assert.equal(cached.body.meta.source, 'cache');
+  assert.equal(calls, 1);
+  const missing = await json(origin, '/api/rankings?q=uncached&cached=1');
+  assert.equal(missing.status, 503);
+  assert.equal(calls, 1);
+  clock += 61 * 60000;
+  const stale = await json(origin, '/api/rankings?cached=1');
+  assert.equal(stale.body.meta.stale, true);
+  assert.equal(stale.body.meta.fetchedAt, initial.body.meta.fetchedAt);
+  assert.equal(calls, 1);
+  const manual = await json(origin, '/api/rankings');
+  assert.equal(manual.status, 200);
+  assert.equal(manual.body.meta.fetchedAt, new Date(clock).toISOString());
+  assert.equal(calls, 2);
+});
+
 test('public bootstrap collects current real snapshots and preserves a complete existing list', async (t) => {
   let repoCalls = 0;
   const { app, origin, root } = await setup(t, { publicMode: true, bootstrapMonitors: 1, fetchImpl: async (url) => {

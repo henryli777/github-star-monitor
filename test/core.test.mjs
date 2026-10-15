@@ -2,6 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as core from '../public/core.mjs';
 
+test('snapshot age advances from the original successful acquisition and invalid times remain unknown', () => {
+  const captured = '2026-10-15T00:00:00Z';
+  const now = Date.parse(captured);
+  assert.equal(core.snapshotAge(captured, now + 59000), '不到 1 分钟前');
+  assert.equal(core.snapshotAge(captured, now + 60000), '1 分钟前');
+  assert.equal(core.snapshotAge(captured, now + 3660000), '1 小时 1 分钟前');
+  assert.equal(core.snapshotAge(captured, now + 86400000), '24 小时 0 分钟前');
+  assert.equal(core.snapshotAge(null, now), '时间未知');
+  assert.equal(core.snapshotAge('invalid', now), '时间未知');
+  assert.equal(core.snapshotAge(captured, now - 60000), '时间待核对');
+});
+
 test('formats counts compactly without hiding zero', () => {
   assert.equal(typeof core.formatNumber, 'function');
   assert.equal(core.formatNumber(0), '0');

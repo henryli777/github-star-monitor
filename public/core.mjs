@@ -90,6 +90,15 @@ export function safeSourceUrl(value) {
   }
 }
 
+export function snapshotAge(value, now = Date.now()) {
+  const captured = value ? Date.parse(value) : NaN;
+  if (!Number.isFinite(captured) || !Number.isFinite(now)) return '时间未知';
+  if (captured > now) return '时间待核对';
+  const minutes = Math.floor((now - captured) / 60000);
+  if (minutes === 0) return '不到 1 分钟前';
+  return minutes < 60 ? `${minutes} 分钟前` : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟前`;
+}
+
 export function toCSV(headers, rows) {
   const cell = (value) => {
     let text = String(value ?? '');

@@ -1,4 +1,4 @@
-import { formatNumber, formatMoney, normalizeRepoInput, selectRevenues, filterRepos, escapeHtml, safeSourceUrl, toCSV } from './core.mjs';
+import { formatNumber, formatMoney, normalizeRepoInput, selectRevenues, filterRepos, escapeHtml, safeSourceUrl, toCSV, snapshotAge } from './core.mjs';
 import { createModalController } from './modal-controller.mjs';
 import { createRefreshController } from './refresh-controller.mjs';
 import { DEFAULT_SCENARIO, normalizeScenario, rankPotential, evaluatePotential } from './potential.mjs';
@@ -161,7 +161,7 @@ function renderStats() {
   $('#stat-monitors').textContent = state.monitors.length;
   $('#nav-monitor-count').textContent = state.monitors.length;
   $('#stat-revenues').textContent = state.revenues.length;
-  $('#hero-date').textContent = state.meta?.fetchedAt ? `采集于 ${localDate(state.meta.fetchedAt, true)}` : '公开仓库 · 来源可查';
+  $('#hero-date').textContent = state.meta?.fetchedAt ? `采集于 ${localDate(state.meta.fetchedAt, true)} · ${snapshotAge(state.meta.fetchedAt)}` : '公开仓库 · 来源可查';
   $('#connection-label').textContent = canWrite() ? state.status?.tokenConfigured ? 'Token 已配置 · 本机管理' : '公开 API · 本机管理' : '公开查看 · 只读';
   $('.connection-version').textContent = `v${state.status?.version || '1.1'}`;
   $('#stat-project-label').textContent = state.view === 'new' ? '新晋榜单项目' : '当前榜单项目';
@@ -301,7 +301,7 @@ function renderTableContent() {
       notice.textContent += ` ${failures.length ? `最近刷新有 ${failures.length} 个项目请求失败。` : ''}${staleCount ? `${staleCount} 个项目的采集数据已超过 90 分钟。` : ''}以下保留旧快照，项目旁可查看实际采集时间。`;
     }
   }
-  else if (state.meta?.stale || state.meta?.incompleteResults) { notice.hidden = false; notice.classList.add('warning'); notice.textContent = `${state.meta.stale ? 'GitHub 暂时不可用，以下为已保存的缓存数据。' : ''}${state.meta.incompleteResults ? 'GitHub 标记当前搜索结果可能不完整。' : ''}请以显示的采集时间为准。`; }
+  else if (state.meta?.stale || state.meta?.incompleteResults) { notice.hidden = false; notice.classList.add('warning'); notice.textContent = `${state.meta.stale ? '以下为已保存的历史缓存数据。' : ''}${state.meta.incompleteResults ? 'GitHub 标记当前搜索结果可能不完整。' : ''}请以显示的采集时间为准。`; }
   else if (state.view === 'new') { notice.hidden = false; notice.textContent = '最近 30 天创建的公开仓库，按当前 Star 数排列。这是新项目榜，历史增长需另行监控。'; }
   if (state.view === 'potential') {
     notice.hidden = false;
@@ -316,7 +316,9 @@ function renderTableContent() {
   }
   area.innerHTML = repos.length ? state.view === 'potential' ? potentialTable(repos) : isEconomicScenario() ? economicTable(repos) : repoTable(repos) : fromMonitors && !state.monitors.length ? empty(canWrite() ? '把值得关注的项目留在这里' : '公开监控正在准备', canWrite() ? '输入 GitHub 仓库地址开始监控。真实快照保存在服务端，随着时间积累可查看 Star 趋势。' : '服务端开始采集后，项目和真实快照将在这里展示。净增长需要等待历史积累。', 'add', '添加监控项目') : empty('没有找到匹配项目', fromMonitors ? '试试其他关键词或语言。' : '试试更短的关键词，或切换语言与主题分类。');
   $('#result-count').textContent = fromMonitors ? `显示 ${repos.length} / ${state.monitors.length} 个监控项目` : `显示 ${repos.length} 个项目${state.meta?.totalCount != null ? ` · 匹配 ${state.meta.totalCount.toLocaleString('zh-CN')} 个` : ''}`;
-  $('#fetched-time').textContent = fromMonitors ? `最近采集尝试：${localDate(state.status?.lastRefreshAt, true)}` : `${state.meta?.source === 'cache' ? '缓存' : 'GitHub API'} · ${localDate(state.meta?.fetchedAt, true)}`;
+  const successfulTimes = state.monitors.map((repo) => repo.fetchedAt).filter((value) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= Date.now()).sort();
+  const latestSuccess = successfulTimes.at(-1);
+  $('#fetched-time').textContent = fromMonitors ? `最近成功采集：${localDate(latestSuccess, true)} · ${snapshotAge(latestSuccess)} · 最近采集尝试：${localDate(state.status?.lastRefreshAt, true)}` : `${state.meta?.source === 'cache' ? '缓存' : 'GitHub API'} · ${localDate(state.meta?.fetchedAt, true)} · ${snapshotAge(state.meta?.fetchedAt)}`;
 }
 async function reloadWorkspace() {
   const workspaceSequence = ++state.workspaceRequest;
@@ -335,7 +337,7 @@ async function readSharedData(monitorsOnly = false) {
   if (!monitorsOnly) {
     reads.push(['revenues', api('/api/revenues')]);
     if (usesRankings()) {
-      const params = new URLSearchParams({ q: state.query, language: state.language, topic: state.topic });
+      const params = new URLSearchParams({ q: state.query, language: state.language, topic: state.topic, cached: '1' });
       if (state.view === 'new') params.set('new', '1');
       reads.push(['rankings', api(`/api/rankings?${params}`)]);
     }
@@ -505,6 +507,7 @@ $('#export-backup').addEventListener('click', async () => { try { const data = a
 document.addEventListener('keydown', (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (state.view === 'sources') setView('potential'); $('#search-input').focus(); } });
 window.addEventListener('hashchange', () => { const view = location.hash.slice(1); if (viewNames[view] && view !== state.view) setView(view); });
 document.addEventListener('visibilitychange', () => { sharedRefresh.visibilityChanged(); });
+window.addEventListener('focus', () => { sharedRefresh.online(); });
 window.addEventListener('online', () => { sharedRefresh.online(); });
 window.addEventListener('pagehide', () => { sharedRefresh.stop(); });
 window.addEventListener('pageshow', (event) => { if (event.persisted) { sharedRefresh.start(); sharedRefresh.online(); } });

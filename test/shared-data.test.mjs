@@ -38,6 +38,26 @@ const responses = {
   },
 };
 
+test('automatic reads request only cached rankings and preserve active filters and scenario inputs', async () => {
+  const requests = [];
+  const app = setup(async (path) => {
+    requests.push(path);
+    return path.startsWith('/api/rankings?') ? { items: [], meta: { fetchedAt: '2026-10-15T00:10:00Z' } } : responses.current[path];
+  });
+  const scenario = { monthlyPrice: 12, activeRate: 0.2 };
+  Object.assign(app.state, { query: 'active input', language: 'JavaScript', topic: 'tools', scenario });
+  app.applySharedData(await app.readSharedData());
+  const params = new URL(requests.find((path) => path.startsWith('/api/rankings?')), 'https://example.test').searchParams;
+  assert.equal(params.get('cached'), '1');
+  assert.equal(params.get('q'), 'active input');
+  assert.equal(params.get('language'), 'JavaScript');
+  assert.equal(params.get('topic'), 'tools');
+  assert.equal(app.state.query, 'active input');
+  assert.equal(app.state.language, 'JavaScript');
+  assert.equal(app.state.topic, 'tools');
+  assert.equal(app.state.scenario, scenario);
+});
+
 test('a slow automatic batch cannot replace workspace data reloaded after management', async () => {
   const ranking = deferred();
   let phase = 'old';
