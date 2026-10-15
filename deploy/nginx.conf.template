@@ -1,0 +1,42 @@
+limit_req_zone $binary_remote_addr zone=starscope_api_rate:10m rate=30r/m;
+limit_conn_zone $binary_remote_addr zone=starscope_connections:10m;
+
+server {
+    listen 80;
+    server_name github.coinexo.top;
+
+    client_max_body_size 16k;
+    client_body_timeout 30s;
+    send_timeout 30s;
+    limit_req_status 429;
+    limit_conn_status 429;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+    proxy_connect_timeout 30s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 30s;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location /api/ {
+        limit_req zone=starscope_api_rate burst=10 nodelay;
+        limit_conn starscope_connections 10;
+        proxy_pass http://127.0.0.1:4320;
+    }
+
+    location / {
+        limit_conn starscope_connections 20;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "no-cache" always;
+        proxy_pass http://127.0.0.1:4320;
+    }
+}

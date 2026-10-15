@@ -19,7 +19,7 @@ async function setup(t, options = {}) {
   await mkdir(join(publicDir, 'inside'));
   await writeFile(join(publicDir, 'inside', 'asset.txt'), 'public asset');
   await symlink(join(publicDir, 'inside'), join(publicDir, 'a', 'a'));
-  const app = await serverModule.createApplication({ dataDir: join(root, 'data'), publicDir, token: 'private-server-token', intervalMs: 0,
+  const app = await serverModule.createApplication({ dataDir: join(root, 'data'), publicDir, token: 'private-server-token', intervalMs: 0, rankingIntervalMs: 0,
     now: () => Date.parse('2026-10-11T00:00:00Z'), fetchImpl: async (url) => new Response(JSON.stringify(new URL(url).pathname === '/search/repositories' ? { items: [sample], total_count: 1, incomplete_results: false } : sample)), ...options });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${app.server.address().port}`;
@@ -31,6 +31,16 @@ async function json(origin, path, options) {
   return { status: response.status, body: await response.json() };
 }
 const post = (body, origin) => ({ method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
+function hostRequest(origin, path, host) {
+  return new Promise((resolve, reject) => {
+    http.get(origin + path, { headers: { Host: host } }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+      response.on('error', reject);
+    }).on('error', reject);
+  });
+}
 
 test('HTTP monitor lifecycle accepts URLs, prevents duplicates, exports persisted data and removes', async (t) => {
   const { origin } = await setup(t);
@@ -128,10 +138,123 @@ test('status reports configured token as a boolean without leaking its value', a
   const result = await json(origin, '/api/status');
   assert.equal(result.body.tokenConfigured, true);
   assert.equal(result.body.refreshMinutes, 60);
+  assert.equal(result.body.rankingRefreshMinutes, 15);
+  assert.equal(result.body.clientRefreshSeconds, 60);
   assert.equal(result.body.monitorCount, 0);
   assert.equal(result.body.lastRefreshAt, null);
   assert.equal(result.body.now, '2026-10-11T00:00:00.000Z');
   assert.equal(JSON.stringify(result.body).includes('private-server-token'), false);
+});
+
+test('public mode serves configured hosts and rejects every workspace mutation', async (t) => {
+  const { origin } = await setup(t, { publicMode: true, allowedHosts: ['github.coinexo.top'] });
+  const status = await hostRequest(origin, '/api/status', 'github.coinexo.top');
+  assert.equal(status.status, 200);
+  assert.equal(JSON.parse(status.text).version, '1.3.0');
+  assert.equal(JSON.parse(status.text).readOnly, true);
+  assert.equal((await hostRequest(origin, '/', 'github.coinexo.top')).status, 200);
+  assert.equal((await hostRequest(origin, '/api/status', 'evil.test')).status, 403);
+  for (const path of ['/api/monitors', '/api/refresh', '/api/revenues']) {
+    const result = await json(origin, path, post({ fullName: 'Owner/Repo' }, origin));
+    assert.equal(result.status, 403, path);
+    assert.equal(result.body.error.code, 'READ_ONLY', path);
+  }
+  for (const path of ['/api/monitors?repo=Owner%2FRepo', '/api/revenues?id=not-an-id']) {
+    assert.equal((await json(origin, path, { method: 'DELETE' })).status, 403, path);
+  }
+  assert.deepEqual((await json(origin, '/api/monitors')).body.items, []);
+  assert.deepEqual((await json(origin, '/api/revenues')).body.items, []);
+});
+
+test('public refresh reads the shared cache instead of bypassing it', async (t) => {
+  let calls = 0;
+  const { origin } = await setup(t, { publicMode: true, fetchImpl: async () => {
+    calls++;
+    return new Response(JSON.stringify({ items: [sample], total_count: 1, incomplete_results: false }));
+  } });
+  await json(origin, '/api/rankings');
+  for (const fresh of ['1', '%201', '1%20']) {
+    const refreshed = await json(origin, `/api/rankings?fresh=${fresh}`);
+    assert.equal(refreshed.status, 200);
+    assert.equal(refreshed.body.meta.source, 'cache');
+    assert.equal(calls, 1);
+  }
+  assert.equal((await json(origin, '/api/rankings?fresh=invalid')).status, 400);
+  assert.equal((await json(origin, '/api/rankings?fresh=%091')).status, 400);
+});
+
+test('public bootstrap collects current real snapshots and preserves a complete existing list', async (t) => {
+  let repoCalls = 0;
+  const { app, origin, root } = await setup(t, { publicMode: true, bootstrapMonitors: 1, fetchImpl: async (url) => {
+    if (new URL(url).pathname === '/search/repositories') return new Response(JSON.stringify({ items: [sample], total_count: 1, incomplete_results: false }));
+    repoCalls++;
+    return new Response(JSON.stringify({ ...sample, stargazers_count: 123 }));
+  } });
+  const monitored = (await json(origin, '/api/monitors')).body.items;
+  assert.equal(monitored.length, 1);
+  assert.equal(monitored[0].stars, 123);
+  assert.deepEqual(monitored[0].growth, { day: null, week: null, month: null });
+  assert.equal(repoCalls, 1);
+  await app.close();
+  const reopened = await serverModule.createApplication({ dataDir: join(root, 'data'), intervalMs: 0, bootstrapMonitors: 1, fetchImpl: async () => { throw new Error('must not reseed'); } });
+  t.after(() => reopened.close());
+  await new Promise((resolve) => reopened.server.listen(0, '127.0.0.1', resolve));
+  assert.equal((await json(`http://127.0.0.1:${reopened.server.address().port}`, '/api/monitors')).body.items.length, 1);
+});
+
+test('bootstrap fills only the remaining slots after restart and preserves prior monitored identities', async (t) => {
+  const { app, root, origin } = await setup(t);
+  await json(origin, '/api/monitors', post({ fullName: 'Owner/Repo' }, origin));
+  await app.close();
+  const reopened = await serverModule.createApplication({ dataDir: join(root, 'data'), intervalMs: 0, bootstrapMonitors: 2, fetchImpl: async (url) => {
+    const path = new URL(url).pathname;
+    if (path === '/search/repositories') return new Response(JSON.stringify({ items: ['NewFirst', 'NewSecond'].map((name) => ({ ...sample, full_name: `Owner/${name}` })), total_count: 2, incomplete_results: false }));
+    return new Response(JSON.stringify({ ...sample, full_name: path.split('/').slice(2).join('/') }));
+  } });
+  t.after(() => reopened.close());
+  await new Promise((resolve) => reopened.server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${reopened.server.address().port}`;
+  const items = (await json(base, '/api/monitors')).body.items;
+  assert.equal(items.length, 2);
+  assert.deepEqual(items.map((item) => item.fullName).sort(), ['Owner/NewFirst', 'Owner/Repo']);
+  assert.equal((await json(base, '/api/repo?name=Owner%2FRepo')).body.history.length, 1);
+});
+
+test('failed bootstrap keeps the application available with an explicit warning', async (t) => {
+  const { origin } = await setup(t, { publicMode: true, bootstrapMonitors: 1, fetchImpl: async () => { throw new Error('offline'); } });
+  const status = await json(origin, '/api/status');
+  assert.equal(status.status, 200);
+  assert.equal(typeof status.body.bootstrapWarning, 'string');
+  assert.deepEqual((await json(origin, '/api/monitors')).body.items, []);
+});
+
+test('partial bootstrap retries failed targets without losing existing snapshots', async (t) => {
+  let failing = true;
+  let clock = Date.parse('2026-10-11T00:00:00Z');
+  let secondCalls = 0;
+  const { origin } = await setup(t, { publicMode: true, bootstrapMonitors: 2, intervalMs: 20, now: () => clock, fetchImpl: async (url) => {
+    const path = new URL(url).pathname;
+    if (path === '/search/repositories') return new Response(JSON.stringify({ items: [sample, { ...sample, full_name: 'Owner/Second' }], total_count: 2, incomplete_results: false }));
+    if (path.endsWith('/Second')) {
+      secondCalls++;
+      if (failing) return new Response('{}', { status: 503 });
+      return new Response(JSON.stringify({ ...sample, full_name: 'Owner/Second' }));
+    }
+    return new Response(JSON.stringify(sample));
+  } });
+  assert.equal((await json(origin, '/api/monitors')).body.items.length, 1);
+  failing = false;
+  clock += 30001;
+  const deadline = Date.now() + 1000;
+  let result;
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    result = (await json(origin, '/api/monitors')).body;
+  } while (result.items.length < 2 && Date.now() < deadline);
+  assert.equal(result.items.length, 2);
+  assert.ok(secondCalls >= 2);
+  assert.equal((await json(origin, '/api/status')).body.bootstrapWarning, null);
+  assert.ok((await json(origin, '/api/repo?name=Owner%2FRepo')).body.history.length >= 1);
 });
 
 test('nested symlinks with repeated directory names cannot bypass static access policy', async (t) => {
@@ -242,4 +365,90 @@ test('an old refresh generation cannot overwrite a monitor removed and re-added 
   const refreshed = await refreshing;
   assert.equal(refreshed.body.items.find((item) => item.fullName === 'Owner/A').stars, 150);
   assert.equal((await json(origin, '/api/repo?name=Owner%2FA')).body.history.at(-1).stars, 150);
+});
+
+test('disabled scheduling does not make unexpected startup ranking requests', async (t) => {
+  let calls = 0;
+  const { origin } = await setup(t, { rankingIntervalMs: undefined, fetchImpl: async () => { calls++; throw new Error('unexpected request'); } });
+  assert.equal((await json(origin, '/api/status')).status, 200);
+  assert.equal(calls, 0);
+});
+
+test('background updates both default rankings without visitors and stops its timer on close', async (t) => {
+  let clock = Date.parse('2026-10-15T00:00:00Z');
+  const queries = [];
+  const { app, origin } = await setup(t, { rankingIntervalMs: 15, now: () => clock, fetchImpl: async (url) => {
+    const query = new URL(url).searchParams.get('q');
+    queries.push(query);
+    return new Response(JSON.stringify({ items: [{ ...sample, stargazers_count: clock === Date.parse('2026-10-15T00:00:00Z') ? 100 : 200 }], total_count: 1 }));
+  } });
+  assert.equal(queries.length, 2);
+  assert.ok(queries.some((query) => query.includes('created:>=')));
+  await json(origin, '/api/rankings?q=custom');
+  assert.equal(queries.length, 3);
+  clock += 15 * 60000;
+  const deadline = Date.now() + 1000;
+  while (queries.length < 5 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(queries.length, 5);
+  assert.equal(queries.filter((query) => query.includes('custom')).length, 1);
+  assert.equal((await json(origin, '/api/rankings')).body.items[0].stars, 200);
+  assert.equal((await json(origin, '/api/rankings?new=1')).body.items[0].stars, 200);
+  await app.close();
+  clock += 15 * 60000;
+  const stoppedAt = queries.length;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(queries.length, stoppedAt);
+});
+
+test('startup reuses recent ranking caches and catches up expired default caches', async (t) => {
+  let clock = Date.parse('2026-10-15T00:00:00Z');
+  const { app, origin, root } = await setup(t, { now: () => clock });
+  const first = await json(origin, '/api/rankings');
+  await json(origin, '/api/rankings?new=1');
+  await json(origin, '/api/rankings?q=custom');
+  await app.close();
+  const queries = [];
+  const options = { dataDir: join(root, 'data'), intervalMs: 0, rankingIntervalMs: 60000, now: () => clock, fetchImpl: async (url) => {
+    queries.push(new URL(url).searchParams.get('q'));
+    return new Response(JSON.stringify({ items: [{ ...sample, stargazers_count: 200 }], total_count: 1 }));
+  } };
+  clock += 14 * 60000;
+  const recent = await serverModule.createApplication(options);
+  await recent.close();
+  assert.equal(queries.length, 0);
+  clock += 2 * 60000;
+  const expired = await serverModule.createApplication(options);
+  t.after(() => expired.close());
+  await new Promise((resolve) => expired.server.listen(0, '127.0.0.1', resolve));
+  assert.equal(queries.length, 2);
+  assert.ok(queries.every((query) => !query.includes('custom')));
+  const updated = await json(`http://127.0.0.1:${expired.server.address().port}`, '/api/rankings');
+  assert.equal(updated.body.items[0].stars, 200);
+  assert.notEqual(updated.body.meta.fetchedAt, first.body.meta.fetchedAt);
+});
+
+test('startup rate limits retain ranking acquisition times and suppress repeated visitor retries', async (t) => {
+  let clock = Date.parse('2026-10-15T00:00:00Z');
+  const { app, origin, root } = await setup(t, { now: () => clock });
+  const initial = await json(origin, '/api/rankings');
+  await json(origin, '/api/rankings?new=1');
+  await app.close();
+  clock += 16 * 60000;
+  let calls = 0;
+  const reopened = await serverModule.createApplication({ dataDir: join(root, 'data'), publicMode: true,
+    intervalMs: 0, rankingIntervalMs: 60000, now: () => clock, fetchImpl: async () => {
+      calls++;
+      return new Response('{}', { status: 429, headers: { 'retry-after': '120' } });
+    } });
+  t.after(() => reopened.close());
+  await new Promise((resolve) => reopened.server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${reopened.server.address().port}`;
+  const attempted = calls;
+  assert.ok(attempted > 0 && attempted <= 2);
+  for (let index = 0; index < 3; index++) {
+    const cached = await json(base, '/api/rankings');
+    assert.equal(cached.body.meta.stale, true);
+    assert.equal(cached.body.meta.fetchedAt, initial.body.meta.fetchedAt);
+  }
+  assert.equal(calls, attempted);
 });

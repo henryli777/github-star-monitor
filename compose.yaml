@@ -1,0 +1,36 @@
+services:
+  app:
+    image: "starscope:${STARSCOPE_RELEASE:-local}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:4320:4320"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4320"
+      DATA_DIR: "/app/data"
+      PUBLIC_MODE: "1"
+      PUBLIC_HOSTS: "github.coinexo.top"
+      BOOTSTRAP_MONITORS: "20"
+      GITHUB_TOKEN: ""
+    volumes:
+      - "${STARSCOPE_STATE_DIR:-./data}:/app/data"
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=16m"
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4320/api/status', { signal: AbortSignal.timeout(4000) }).then(response => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1));"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3

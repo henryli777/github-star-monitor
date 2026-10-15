@@ -8,7 +8,10 @@ import { createGitHubClient, normalizeRepoName } from './lib/github.mjs';
 import { AppError, publicError } from './lib/errors.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const APP_VERSION = JSON.parse(await fs.readFile(join(ROOT, 'package.json'), 'utf8')).version;
 const REFRESH_MINUTES = 60;
+const RANKING_REFRESH_MINUTES = 15;
+const CLIENT_REFRESH_SECONDS = 60;
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.woff2': 'font/woff2' };
 
 function sendJson(response, status, body) {
@@ -84,10 +87,60 @@ async function serveStatic(request, response, publicDir) {
 }
 
 export async function createApplication({ dataDir = join(ROOT, 'data'), publicDir = join(ROOT, 'public'), token = process.env.GITHUB_TOKEN || '', fetchImpl = fetch, now = Date.now,
-  intervalMs = REFRESH_MINUTES * 60000, timeoutMs = 12000 } = {}) {
+  intervalMs = REFRESH_MINUTES * 60000, rankingIntervalMs = intervalMs > 0 ? RANKING_REFRESH_MINUTES * 60000 : 0,
+  timeoutMs = 12000, publicMode = false, allowedHosts = [], bootstrapMonitors = 0 } = {}) {
+  if (!Number.isInteger(bootstrapMonitors) || bootstrapMonitors < 0 || bootstrapMonitors > 30) throw new AppError('INVALID_CONFIG', '初始监控数量必须为 0–30。');
+  if (!Array.isArray(allowedHosts) || !allowedHosts.every((host) => typeof host === 'string' && /^[a-zA-Z0-9.-]+(?::\d{1,5})?$/.test(host))) throw new AppError('INVALID_CONFIG', '公开域名配置无效。');
   const store = await openStore({ dataDir, now });
-  const github = createGitHubClient({ store, token, fetchImpl, now, timeoutMs });
+  const github = createGitHubClient({ store, token, fetchImpl, now, timeoutMs, detailRequestLimit: publicMode ? 20 : Infinity });
   let activeRefresh;
+  let activeBootstrap;
+  let activeRankingRefresh;
+  let bootstrapTargets = null;
+  let bootstrapWarning = null;
+  async function collectBootstrap() {
+    if (!bootstrapMonitors || store.monitors().length >= bootstrapMonitors) return;
+    try {
+      if (bootstrapTargets === null || !bootstrapTargets.length) {
+        const ranking = await github.rankings();
+        const existing = new Set(store.monitors().map((repo) => repo.fullName.toLowerCase()));
+        bootstrapTargets = ranking.items.slice(0, bootstrapMonitors).filter((repo) => !existing.has(repo.fullName.toLowerCase()))
+          .slice(0, Math.max(0, bootstrapMonitors - existing.size));
+      }
+      const targets = bootstrapTargets;
+      let cursor = 0;
+      const errors = [];
+      const failed = [];
+      async function worker() {
+        while (cursor < targets.length) {
+          const repo = targets[cursor++];
+          try {
+            const current = await github.repository(repo.fullName, { fresh: true });
+            await store.addMonitor(current.item);
+          } catch (error) { errors.push(publicError(error).message); failed.push(repo); }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(3, targets.length) }, () => worker()));
+      bootstrapTargets = failed;
+      bootstrapWarning = errors.length ? `初始监控有 ${errors.length} 个项目采集失败。` : null;
+    } catch (error) { bootstrapWarning = publicError(error).message; }
+  }
+  function bootstrap() {
+    if (activeBootstrap) return activeBootstrap;
+    const operation = collectBootstrap();
+    activeBootstrap = operation;
+    operation.finally(() => { activeBootstrap = null; }).catch(() => {});
+    return operation;
+  }
+  await bootstrap();
+  function refreshRankings() {
+    if (activeRankingRefresh) return activeRankingRefresh;
+    const operation = Promise.allSettled([github.rankings(), github.rankings({ new: '1' })]);
+    activeRankingRefresh = operation;
+    operation.finally(() => { activeRankingRefresh = null; }).catch(() => {});
+    return operation;
+  }
+  if (rankingIntervalMs > 0) await refreshRankings();
   function refresh() {
     if (activeRefresh) return activeRefresh;
     const operation = (async () => {
@@ -122,12 +175,20 @@ export async function createApplication({ dataDir = join(ROOT, 'data'), publicDi
     const allowed = routes[url.pathname];
     if (!allowed) throw new AppError('NOT_FOUND', 'API 路径不存在。', 404);
     if (!allowed.includes(method)) throw new AppError('METHOD_NOT_ALLOWED', '此接口不支持该请求方法。', 405);
-    if (method !== 'GET') checkMutationOrigin(request);
+    if (method !== 'GET') {
+      if (publicMode) throw new AppError('READ_ONLY', '公开站点只允许查看；管理操作请使用本地工作空间。', 403);
+      checkMutationOrigin(request);
+    }
     if (url.pathname === '/api/status') {
       queryValues(url, []);
-      return sendJson(response, 200, { tokenConfigured: Boolean(token), refreshMinutes: REFRESH_MINUTES, monitorCount: store.monitors().length, lastRefreshAt: store.lastRefreshAt(), now: new Date(now()).toISOString() });
+      return sendJson(response, 200, { version: APP_VERSION, readOnly: publicMode, bootstrapWarning, tokenConfigured: Boolean(token), refreshMinutes: REFRESH_MINUTES,
+        rankingRefreshMinutes: RANKING_REFRESH_MINUTES, clientRefreshSeconds: CLIENT_REFRESH_SECONDS,
+        monitorCount: store.monitors().length, lastRefreshAt: store.lastRefreshAt(), now: new Date(now()).toISOString() });
     }
-    if (url.pathname === '/api/rankings') return sendJson(response, 200, await github.rankings(queryValues(url, ['language', 'topic', 'q', 'new', 'fresh'])));
+    if (url.pathname === '/api/rankings') {
+      const params = queryValues(url, ['language', 'topic', 'q', 'new', 'fresh']);
+      return sendJson(response, 200, await github.rankings(params, { allowFresh: !publicMode }));
+    }
     if (url.pathname === '/api/repo') {
       const { name } = queryValues(url, ['name']);
       const canonical = normalizeRepoName(name);
@@ -163,8 +224,8 @@ export async function createApplication({ dataDir = join(ROOT, 'data'), publicDi
   }
   const server = http.createServer((request, response) => {
     (async () => {
-      if (!['127.0.0.1', `127.0.0.1:${request.socket.localPort}`, 'localhost', `localhost:${request.socket.localPort}`].includes(request.headers.host)) {
-        throw new AppError('FORBIDDEN_HOST', '请通过本机回环地址访问此服务。', 403);
+      if (!['127.0.0.1', `127.0.0.1:${request.socket.localPort}`, 'localhost', `localhost:${request.socket.localPort}`, ...allowedHosts].includes(request.headers.host?.toLowerCase())) {
+        throw new AppError('FORBIDDEN_HOST', '此访问域名未配置。', 403);
       }
       const url = new URL(request.url, `http://127.0.0.1:${request.socket.localPort}`);
       if (url.pathname.startsWith('/api/')) await api(request, response, url);
@@ -178,12 +239,20 @@ export async function createApplication({ dataDir = join(ROOT, 'data'), publicDi
   server.requestTimeout = 20000;
   server.headersTimeout = 15000;
   const timer = intervalMs > 0 ? setInterval(() => {
-    if (store.monitors().length) refresh().catch(() => {});
+    (async () => {
+      await bootstrap();
+      if (store.monitors().length) await refresh();
+    })().catch(() => {});
   }, intervalMs) : null;
   timer?.unref();
+  const rankingTimer = rankingIntervalMs > 0 ? setInterval(() => { refreshRankings().catch(() => {}); }, rankingIntervalMs) : null;
+  rankingTimer?.unref();
   async function close() {
     if (timer) clearInterval(timer);
+    if (rankingTimer) clearInterval(rankingTimer);
+    if (activeBootstrap) await activeBootstrap.catch(() => {});
     if (activeRefresh) await activeRefresh.catch(() => {});
+    if (activeRankingRefresh) await activeRankingRefresh.catch(() => {});
     if (server.listening) await new Promise((resolve) => server.close(resolve));
   }
   return { server, close, refresh };
@@ -196,9 +265,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     process.exitCode = 1;
   } else {
     try {
-      const app = await createApplication();
+      const host = process.env.HOST || '127.0.0.1';
+      if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new AppError('INVALID_CONFIG', 'HOST 必须为 127.0.0.1 或 0.0.0.0。');
+      const app = await createApplication({
+        dataDir: process.env.DATA_DIR || join(ROOT, 'data'),
+        publicMode: process.env.PUBLIC_MODE === '1',
+        allowedHosts: (process.env.PUBLIC_HOSTS || '').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean),
+        bootstrapMonitors: Number(process.env.BOOTSTRAP_MONITORS || '0'),
+      });
       app.server.on('error', () => { console.error('本地服务无法启动，请检查端口是否已被使用。'); process.exitCode = 1; });
-      app.server.listen(Number(value), '127.0.0.1', () => console.log(`StarScope: http://127.0.0.1:${value}`));
+      app.server.listen(Number(value), host, () => console.log(`StarScope: http://${host}:${value}`));
       for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { app.close().then(() => process.exit(0)); });
     } catch (error) {
       console.error(publicError(error).message);

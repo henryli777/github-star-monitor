@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f6f8fa">
-  <meta name="description" content="StarScope：发现 GitHub 热门开源项目，查看真实 Star 排行，持续监控项目增长与有来源的收入披露。">
+  <meta name="description" content="StarScope：查看开源项目研究规则分、保守/基准/积极三档假设模拟月收入、真实 Star 与增长数据，以及独立的有来源收入披露。">
   <title>StarScope · 看见开源的下一颗明星</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/styles.css">
@@ -12,27 +12,29 @@
 </head>
 <body>
   <aside class="sidebar" aria-label="主导航">
-    <a class="brand" href="#ranking" aria-label="StarScope 首页"><span class="brand-mark">✳</span><span>StarScope<span class="brand-dot">.</span></span></a>
+    <a class="brand" href="#potential" aria-label="StarScope 首页"><span class="brand-mark">✳</span><span>StarScope<span class="brand-dot">.</span></span></a>
     <div class="sidebar-caption">开源趋势，尽在掌握</div>
     <div class="nav-section-label">探索</div>
     <nav>
-      <button class="nav-item active" data-view="ranking"><span data-icon="chart"></span>Star 排行<span class="nav-pill">TOP</span></button>
+      <button class="nav-item active" data-view="potential"><span data-icon="activity"></span>变现潜力<span class="nav-pill">规则</span></button>
+      <button class="nav-item" data-view="ranking"><span data-icon="chart"></span>Star 排行<span class="nav-pill">TOP</span></button>
       <button class="nav-item" data-view="new"><span data-icon="sparkles"></span>新晋热门</button>
-      <button class="nav-item" data-view="revenue"><span data-icon="wallet"></span>收入排行<span class="nav-small">披露</span></button>
+      <button class="nav-item" data-view="revenue"><span data-icon="wallet"></span>商业价值<span class="nav-small">场景</span></button>
       <div class="nav-section-label workspace-label">工作空间</div>
-      <button class="nav-item" data-view="monitors"><span data-icon="bookmark"></span>我的监控<span id="nav-monitor-count" class="nav-count">0</span></button>
+      <button class="nav-item" data-view="monitors"><span data-icon="bookmark"></span><span id="monitor-view-label">公开监控</span><span id="nav-monitor-count" class="nav-count">0</span></button>
       <button class="nav-item" data-view="sources"><span data-icon="database"></span>数据说明</button>
     </nav>
+    <a class="support-link sidebar-support" href="https://support.coinexo.top/?project=starscope" target="_blank" rel="noopener noreferrer"><svg class="icon support-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/></svg><span>支持项目</span></a>
     <div class="sidebar-bottom">
-      <div class="sidebar-note"><span class="little-star">✧</span><strong>让好项目被看见</strong><p>关注有价值的代码，<br>记录开源成长的每一步。</p><button data-action="add" class="sidebar-add">添加第一个监控 <span>↗</span></button></div>
-      <div class="connection"><span class="status-dot"></span><span id="connection-label">本地工作空间</span><span class="connection-version">v1.0</span></div>
+      <div class="sidebar-note"><span class="little-star">✧</span><strong>让好项目被看见</strong><p>关注有价值的代码，<br>记录开源成长的每一步。</p><button data-action="add" data-admin class="sidebar-add" hidden>添加第一个监控 <span>↗</span></button></div>
+      <div class="connection"><span class="status-dot"></span><span id="connection-label">公开查看</span><span class="connection-version">v1.1</span></div>
     </div>
   </aside>
   <div class="main-shell">
     <header class="topbar">
       <div class="mobile-brand"><span class="brand-mark">✳</span>StarScope.</div>
-      <div class="breadcrumb"><span>探索开源</span><span class="breadcrumb-slash">/</span><strong id="breadcrumb-current">Star 排行</strong></div>
-      <div class="topbar-actions"><span class="official-badge"><span class="status-dot"></span>GitHub 官方数据</span><button class="icon-button" id="export-backup" title="备份工作空间" aria-label="备份工作空间" data-icon="download"></button><a class="github-link" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub" data-icon="github"></a></div>
+      <div class="breadcrumb"><span>探索开源</span><span class="breadcrumb-slash">/</span><strong id="breadcrumb-current">变现潜力</strong></div>
+      <div class="topbar-actions"><span class="official-badge"><span class="status-dot"></span>GitHub 官方数据</span><a class="support-link" href="https://support.coinexo.top/?project=starscope" target="_blank" rel="noopener noreferrer"><span data-icon="wallet"></span><span>支持项目</span></a><button class="icon-button" id="export-backup" title="备份工作空间" aria-label="备份工作空间" data-icon="download"></button><a class="github-link" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub" data-icon="github"></a></div>
     </header>
     <main>
       <section class="hero" id="hero">
@@ -42,12 +44,39 @@
       <section class="stats-grid" aria-label="当前数据概览">
         <article class="stat-card"><div class="stat-top"><span id="stat-project-label">当前榜单项目</span><span class="stat-icon mint" data-icon="layers"></span></div><div class="stat-value" id="stat-projects">—</div><div class="stat-foot">当前查询中的前 50 个项目</div></article>
         <article class="stat-card"><div class="stat-top"><span>榜内累计 Star</span><span class="stat-icon gold" data-icon="star"></span></div><div class="stat-value" id="stat-stars">—</div><div class="stat-foot">仅统计当前榜单中的项目</div></article>
-        <article class="stat-card"><div class="stat-top"><span>我的监控项目</span><span class="stat-icon lavender" data-icon="bookmark"></span></div><div class="stat-value" id="stat-monitors">0</div><div class="stat-foot"><span class="tiny-dot"></span>服务运行时每小时采集</div></article>
+        <article class="stat-card"><div class="stat-top"><span id="stat-monitor-label">公开监控项目</span><span class="stat-icon lavender" data-icon="bookmark"></span></div><div class="stat-value" id="stat-monitors">0</div><div class="stat-foot"><span class="tiny-dot"></span>服务运行时每小时采集</div></article>
         <article class="stat-card"><div class="stat-top"><span>收入披露记录</span><span class="stat-icon peach" data-icon="wallet"></span></div><div class="stat-value" id="stat-revenues">0</div><div class="stat-foot">附来源链接的项目收入声明</div></article>
       </section>
       <div class="content-layout" id="content-layout">
         <section class="ranking-panel">
-          <div class="panel-heading"><div><h2 id="panel-title">Star 排行榜<span class="heading-tag">TOP 50</span></h2><p id="panel-description">发现最受开发者喜爱的开源项目</p></div><div class="panel-actions"><button id="refresh-button" class="text-button"><span data-icon="refresh"></span><span>刷新</span></button><button id="export-button" class="outline-button"><span data-icon="download"></span><span>导出</span></button><button id="context-add" class="primary-button" hidden><span data-icon="plus"></span><span>添加项目</span></button></div></div>
+          <div class="panel-heading"><div><h2 id="panel-title">变现潜力榜<span class="heading-tag">规则分</span></h2><p id="panel-description">透明规则评分 · 模拟月收入为假设测算</p></div><div class="panel-actions"><button id="refresh-button" data-admin class="text-button" hidden><span data-icon="refresh"></span><span>刷新</span></button><button id="export-button" class="outline-button"><span data-icon="download"></span><span>导出</span></button><button id="context-add" data-admin class="primary-button" hidden><span data-icon="plus"></span><span>添加项目</span></button></div></div>
+          <div class="rank-tabs potential-tabs" id="potential-tabs"><button class="rank-tab active" data-potential-sort="score">潜力分</button><button class="rank-tab" data-potential-sort="revenue">模拟金额</button><button class="rank-tab" data-potential-sort="stars">Star</button><span class="tabs-note">规则分与模拟金额分别排序</span></div>
+          <section id="scenario-section" class="scenario-section" aria-label="模拟月收入假设">
+            <details id="scenario-details"><summary><span><strong>模拟月收入参数</strong><span id="scenario-summary"></span></span><span class="scenario-toggle">调整假设 <span aria-hidden="true">⌄</span></span></summary>
+              <form id="scenario-form" class="scenario-form" novalidate>
+                <label for="scenario-active">活跃用户比例 (%)<input id="scenario-active" name="activeRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="scenario-error"></label>
+                <label for="scenario-paid">活跃用户付费比例 (%)<input id="scenario-paid" name="paidRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-describedby="scenario-error"></label>
+                <label for="scenario-price">月客单价（假设）<input id="scenario-price" name="monthlyPrice" type="number" min="0" max="100000" step="any" required inputmode="decimal" aria-describedby="scenario-error"></label>
+                <label for="scenario-currency">测算币种<select id="scenario-currency" name="currency"><option value="CNY">人民币 CNY</option><option value="USD">美元 USD</option><option value="EUR">欧元 EUR</option></select></label>
+                <p id="scenario-error" class="scenario-error" role="alert" hidden></p><p class="scenario-footnote">模拟月收入 = Star × 活跃比例 × 付费比例 × 月客单价。未经收入样本校准；币种仅用于假设计价，不进行汇率换算。</p><button type="button" id="scenario-reset" class="text-button">恢复默认假设</button>
+              </form>
+            </details>
+          </section>
+          <div class="rank-tabs economic-tabs" id="economic-tabs" role="tablist" aria-label="商业价值数据类型" hidden><button id="economic-tab-scenario" class="rank-tab active" data-economic-tab="scenario" role="tab" aria-selected="true" aria-controls="table-area">场景测算</button><button id="economic-tab-disclosed" class="rank-tab" data-economic-tab="disclosed" role="tab" aria-selected="false" aria-controls="table-area">真实披露</button><span class="tabs-note">假设测算与来源披露分别展示</span></div>
+          <section id="economic-scenario-section" class="scenario-section economic-scenario-section" aria-label="商业价值三档测算假设" hidden>
+            <details id="economic-scenario-details"><summary><span><strong>保守 / 基准 / 积极 · 月收入假设</strong><span id="economic-scenario-summary"></span></span><span class="scenario-toggle">调整参数 <span aria-hidden="true">⌄</span></span></summary>
+              <form id="economic-scenario-form" class="economic-scenario-form" novalidate>
+                <div class="economic-parameter-scroll"><table class="economic-parameter-table"><thead><tr><th scope="col">场景</th><th scope="col">活跃比例 (%)</th><th scope="col">活跃用户付费比例 (%)</th><th scope="col">假设月客单价</th></tr></thead><tbody>
+                  <tr><th scope="row">保守</th><td><input name="conservative.activeRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="保守活跃比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="conservative.paidRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="保守活跃用户付费比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="conservative.monthlyPrice" type="number" min="0" max="100000" step="any" required inputmode="decimal" aria-label="保守假设月客单价" aria-describedby="economic-scenario-error"></td></tr>
+                  <tr><th scope="row">基准</th><td><input name="base.activeRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="基准活跃比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="base.paidRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="基准活跃用户付费比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="base.monthlyPrice" type="number" min="0" max="100000" step="any" required inputmode="decimal" aria-label="基准假设月客单价" aria-describedby="economic-scenario-error"></td></tr>
+                  <tr><th scope="row">积极</th><td><input name="optimistic.activeRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="积极活跃比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="optimistic.paidRate" type="number" min="0" max="100" step="any" required inputmode="decimal" aria-label="积极活跃用户付费比例 (%)" aria-describedby="economic-scenario-error"></td><td><input name="optimistic.monthlyPrice" type="number" min="0" max="100000" step="any" required inputmode="decimal" aria-label="积极假设月客单价" aria-describedby="economic-scenario-error"></td></tr>
+                </tbody></table></div>
+                <div class="economic-parameter-actions"><label for="economic-scenario-currency">测算币种<select id="economic-scenario-currency" name="currency"><option value="CNY">人民币 CNY</option><option value="USD">美元 USD</option><option value="EUR">欧元 EUR</option></select></label><button type="button" id="economic-scenario-reset" class="text-button"><span data-icon="refresh"></span>恢复默认</button></div>
+                <p id="economic-scenario-error" class="scenario-error" role="alert" hidden></p><p class="scenario-footnote">每档模拟月收入 = Star × 活跃比例 × 付费比例 × 月客单价。三档每 Star 金额须按保守、基准、积极非递减。未经真实收入样本校准；实际收入可能为零；未扣成本，不代表利润。币种只用于假设计价，不进行汇率换算。</p>
+              </form>
+            </details>
+          </section>
+          <div id="economic-sort-row" class="economic-sort-row" hidden><label for="economic-sort">排序<select id="economic-sort"><option value="base">基准模拟月收入</option><option value="score">研究规则分</option></select></label><span>真实 GitHub 指标 · 统一三档假设</span></div>
           <div class="rank-tabs" id="rank-tabs"><button class="rank-tab active" data-sort="stars">Star 总榜</button><button class="rank-tab" data-sort="day">日增长榜</button><button class="rank-tab" data-sort="week">周增长榜</button><button class="rank-tab" data-sort="month">月增长榜</button><span class="tabs-note" id="tabs-note">公开仓库 · 排除 Fork</span></div>
           <div class="filters" id="filters"><label class="search-box"><span data-icon="search"></span><input id="search-input" type="search" placeholder="搜索项目、作者或关键词…" autocomplete="off" aria-label="搜索项目"><kbd>⌘ K</kbd></label><label class="select-wrap" id="language-wrap"><span data-icon="code"></span><select id="language-select" aria-label="选择编程语言"><option value="">所有语言</option><option>JavaScript</option><option>TypeScript</option><option>Python</option><option>Go</option><option>Rust</option><option>Java</option><option>C++</option><option>C</option><option>PHP</option><option>Swift</option></select><span class="select-chevron">⌄</span></label><label class="select-wrap" id="currency-wrap" hidden><select id="currency-select" aria-label="收入币种"><option value="USD">美元 USD</option><option value="CNY">人民币 CNY</option><option value="EUR">欧元 EUR</option></select></label><label class="select-wrap" id="period-wrap" hidden><select id="period-select" aria-label="收入周期"><option value="monthly">月度披露</option><option value="yearly">年度披露</option><option value="one-time">单次收入</option></select></label></div>
           <div class="category-row" id="category-row"><button class="category-chip active" data-topic="">全部项目</button><button class="category-chip" data-topic="artificial-intelligence">人工智能</button><button class="category-chip" data-topic="developer-tools">开发工具</button><button class="category-chip" data-topic="web-development">Web 开发</button><button class="category-chip" data-topic="awesome">学习资源</button></div>
@@ -57,14 +86,14 @@
         </section>
         <aside class="discovery-column" id="discovery-column">
           <section class="discovery-card"><div class="discovery-heading"><h3><span class="trending-icon">↗</span> 值得关注</h3><span class="small-label">榜单精选</span></div><p class="muted">从当前榜单发现下一个灵感</p><div id="featured-projects"></div><button class="card-link" data-view="new">发现新晋热门 <span>↗</span></button></section>
-          <section class="monitor-promo"><div class="promo-icon" data-icon="activity"></div><h3>喜欢它，就关注它。</h3><p>把项目加入监控，持续记录 Star 变化，积累属于你的开源观察。</p><div class="promo-rule"><span class="status-dot"></span>真实快照 · 本地保存</div><button class="dark-button" data-action="add"><span data-icon="plus"></span>添加监控项目</button></section>
-          <section class="source-note"><span data-icon="shield"></span><div><strong>每个数字，都有出处</strong><p>Star 来自 GitHub 官方接口。收入来自附链接的披露记录。</p><button data-view="sources">了解数据口径 <span>↗</span></button></div></section>
+          <section class="monitor-promo"><div class="promo-icon" data-icon="activity"></div><h3 id="monitor-promo-title">记录项目，观察成长。</h3><p id="monitor-promo-description">查看监控项目的真实 Star 快照，随着历史积累观察净增长。</p><div class="promo-rule"><span class="status-dot"></span>真实快照 · 服务端保存</div><button class="dark-button" data-action="add" data-admin hidden><span data-icon="plus"></span>添加监控项目</button></section>
+          <section class="source-note"><span data-icon="shield"></span><div><strong>每个数字，都有出处</strong><p>Star 来自 GitHub。潜力分按透明规则计算，模拟月收入未经收入样本校准。真实收入来自附链接的披露。</p><button data-view="sources">了解数据口径 <span>↗</span></button></div></section>
         </aside>
       </div>
-      <footer class="site-footer"><span><strong>StarScope.</strong> 发现价值，记录成长。</span><span>Built for the open source community <span class="footer-star">✦</span></span></footer>
+      <footer class="site-footer"><span><strong>StarScope.</strong> 发现价值，记录成长。</span><span class="footer-actions"><span>Built for the open source community <span class="footer-star">✦</span></span><a class="support-link" href="https://support.coinexo.top/?project=starscope" target="_blank" rel="noopener noreferrer"><span data-icon="wallet"></span><span>支持项目</span></a></span></footer>
     </main>
   </div>
-  <dialog id="modal" aria-labelledby="modal-title"><div class="modal-shell"><button class="modal-close icon-button" id="modal-close" aria-label="关闭弹窗" data-icon="close"></button><div id="modal-content"></div></div></dialog>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="modal-shell"><button class="modal-close icon-button" id="modal-close" aria-label="关闭弹窗" data-icon="close"></button><a class="support-link dialog-support" href="https://support.coinexo.top/?project=starscope" target="_blank" rel="noopener noreferrer"><svg class="icon support-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/></svg><span>支持项目</span></a><div id="modal-content"></div></div></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>
